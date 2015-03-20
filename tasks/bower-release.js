@@ -25,14 +25,6 @@
 'use strict';
 
 module.exports = function(grunt) {
-
-  var di = require('di');
-  var injectionModule = require('./injection-module');
-  var injector = new di.Injector([injectionModule(grunt)]);
-
-  var Git = require('./endpoints/git');
-  var Test = require('./endpoints/test-ep');
-
   /*
    * Other VCS tools can be added here as needed in the future.
    * The following functions are required:
@@ -49,8 +41,8 @@ module.exports = function(grunt) {
    * falsy ones) are ignored.
    */
   var endpoints = {
-    git: injector.instantiate(Git),
-    test: injector.instantiate(Test)
+    git: require('./endpoints/git')(grunt),
+    test: require('./endpoints/test-ep')(grunt)
   }
 
   grunt.registerMultiTask('bowerRelease',
@@ -118,7 +110,7 @@ module.exports = function(grunt) {
 
     var dependencies = {};
 
-    if (options.extendDependencies == true)
+    if (options.extendDependencies === true)
       dependencies = bowerJSON.dependencies || {};
 
     delete bowerJSON.dependencies;
@@ -168,20 +160,39 @@ module.exports = function(grunt) {
       /* Once we're in the stageDir, we can check out the existing code.
        * It doesn't matter if checkout fails, however.
        */
-      endpoint.clone(options.endpoint, options.branchName, '.', cloned)
+      endpoint.clone(options.endpoint, options.branchName, '.', cloned);
+
       function cloned(err) {
         /* An error may have happened, but isn't really consequential.
          * Now, copy in each of the files that we care about.
          */
-        process.chdir(startDir)
-        var files = [];
-        /* bower.json / component.json needs to be copied specially, because
-         * some fields in it may be overridden
-         */
-        if (bowerFile) files.push(bowerFile)
-        grunt.file.write(options.stageDir + '/' + bowerFile,
-          JSON.stringify(bowerJSON, null, 2))
-        copyBuildFilesToStage()
+
+          var files = [];
+
+          removeFiles(function(){
+               grunt.log.writeln('Arquivos removidos');
+              /* bower.json / component.json needs to be copied specially, because
+               * some fields in it may be overridden
+               */
+              process.chdir(startDir);
+              if (bowerFile) files.push(bowerFile)
+              grunt.file.write(options.stageDir + '/' + bowerFile,
+                  JSON.stringify(bowerJSON, null, 2))
+              copyBuildFilesToStage()
+        });
+
+
+      }
+
+      function removeFiles(done){
+          process.chdir(options.stageDir);
+          fs.readdir(options.stageDir,function(err,files){
+              files.filter(function(file){
+                  return file.indexOf('.git') < 0;
+              });
+              grunt.log.writeln('Removendo arquivos ' + files);
+              endpoint.remove(files,done);
+          });
       }
 
       function copyBuildFilesToStage(){
@@ -270,43 +281,16 @@ module.exports = function(grunt) {
         var msg = grunt.option('m') || grunt.option('message')
         if(typeof msg !== 'string' || !msg.length)
           msg = 'Bumped version to ' + bowerJSON.version
-        endpoint.commit(msg, shouldOverwriteTag)
+        endpoint.commit(msg, function(err) {
+          /* Tag name must be valid semver -- but I'm not validating this here. */
+          /* TODO: Validate this here! */
+          endpoint.tag(bowerJSON.version, makeTagMsg(options.packageName), tagged)
+        })
       }
 
-      function shouldOverwriteTag() {
-        if (options.overwriteTag) {
-          overwriteTag();
-        } else {
-          shouldRemoveVersionTags();
-        }
-      }
-
-      function overwriteTag() {
-        endpoint.removeLocalTag(bowerJSON.version, function() {
-          endpoint.removeRemoteTag(bowerJSON.version, shouldRemoveVersionTags);
-        });
-      }
-
-      function shouldRemoveVersionTags() {
-        if (options.removeVersionTags) {
-          endpoint.getVersionTags(bowerJSON.version, function(tags) {
-            endpoint.removeVersionTags(tags, tag);
-          });
-        } else {
-          tag();
-        }
-      }
-
-      function tag() {
-        /* Tag name must be valid semver -- but I'm not validating this here. */
-        /* TODO: Validate this here! */
-        var tag = (options.suffixTagWithTimestamp) ? bowerJSON.version + '+' + new Date().getTime() : bowerJSON.version;
-        endpoint.tag(tag, makeTagMsg(options.packageName), function() { tagged(tag) });
-      }
-
-      function tagged(tag) {
+      function tagged(err) {
         /* After commiting/tagging the release, push to the server */
-        endpoint.push(options.branchName, tag, pushed)
+        endpoint.push(options.branchName, bowerJSON.version, pushed)
       }
 
       function pushed(err) {

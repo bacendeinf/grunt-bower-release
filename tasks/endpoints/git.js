@@ -1,7 +1,7 @@
 /**
  * The MIT License (MIT)
  *
- * Copyright (c) 2013 Caitlin Potter and Contributors
+ * Copyright (c) 2013 Caitlin Potter and Contributors 
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,14 +22,14 @@
  * THE SOFTWARE.
  */
 
-function Git(grunt, async) {
+module.exports = function(grunt) {
   /* Verbosity */
   var streams = [undefined, undefined, undefined]
   if(grunt.option('verbose')) {
     streams[1] = process.stdout
     streams[2] = process.stderr
   }
-  var gitEndpoint = {
+  return {
     /* Ensure that the VCS is installed on the system, and therefore usable. */
     setUp: function(parentArg, done) {
       grunt.util.spawn({
@@ -77,9 +77,7 @@ function Git(grunt, async) {
 
     /* Add the array of files into the repository, relative to the CWD */
     add: function(files, done) {
-      async.eachSeries(files, function(file, done) {
-        //Double check for avoiding failing on undefined files in array
-        if (!file) return done()
+      grunt.util.async.forEach(files, function(file, done) {
         var args = ['add', file]
         grunt.verbose.writeln('git ' + args.join(' '))
         grunt.util.spawn({
@@ -87,8 +85,31 @@ function Git(grunt, async) {
           args: args,
           opts: { stdio: streams }
         }, done)
-      }, done);
+      }, function(err, result, code) {
+        // Hopefully enough time...
+        setTimeout(function() {
+          done(err, result, code);
+        }, 500);
+      });
     },
+
+      /* Add the array of files into the repository, relative to the CWD */
+      remove: function(files, done) {
+          grunt.util.async.forEach(files, function(file, done) {
+              var args = ['rm', file]
+              grunt.verbose.writeln('git ' + args.join(' '))
+              grunt.util.spawn({
+                  cmd: 'git',
+                  args: args,
+                  opts: { stdio: streams }
+              }, done)
+          }, function(err, result, code) {
+              // Hopefully enough time...
+              setTimeout(function() {
+                  done(err, result, code);
+              }, 500);
+          });
+      },
 
     /* Commit the current changes to a changeset, with the specified message. */
     commit: function(message, done) {
@@ -101,50 +122,10 @@ function Git(grunt, async) {
       }, done)
     },
 
-    removeVersionTags: function(tags, done) {
-      grunt.verbose.writeln('remove version tags: ' + tags);
-      async.eachSeries(tags, gitEndpoint.removeLocalTag, done);
-    },
-
-    getVersionTags: function(version, done) {
-      grunt.verbose.writeln('git tag');
-
-      grunt.util.spawn({
-        cmd: 'git',
-        args: ['tag']
-      }, function(error, result) {
-        var tags = result.stdout.split(/\n/);
-        done(tags.filter(function(tag) {
-          return tag.indexOf(version) === 0;
-        }));
-      });
-    },
-
-    removeLocalTag: function(tag, done) {
-      var args = ['tag', '-d', tag];
-      grunt.verbose.writeln('git ' + args.join(' '));
-      grunt.util.spawn({
-        cmd: 'git',
-        args: args,
-        opts: { stdio: streams }
-      }, function () {
-        gitEndpoint.removeRemoteTag(tag, done);
-      });
-    },
-
-    removeRemoteTag: function(tag, done) {
-      var args = ['push', 'origin', ':refs/tags/' + tag];
-      grunt.verbose.writeln('git ' + args.join(' '));
-      grunt.util.spawn({
-        cmd: 'git',
-        args: args,
-        opts: { stdio: streams }
-      }, done);
-    },
-
     /* 'Tag' the release */
     tag: function(tagname, msg, done) {
       var args = ['tag', tagname]
+        args.push('-f')
       if(typeof msg === 'string') {
         args.push('-m')
         args.push(msg)
@@ -167,6 +148,8 @@ function Git(grunt, async) {
       if(typeof branch === 'string')
         args.push(branch)
       args.push(tag)
+        args.push('--tags')
+        args.push('-f')
       grunt.verbose.writeln('git ' + args.join(' '))
       grunt.util.spawn({
         cmd: 'git',
@@ -174,11 +157,6 @@ function Git(grunt, async) {
         opts: { stdio: streams }
       }, done)
     }
-  };
-
-  return gitEndpoint;
+  }
 }
 
-Git.$inject = ['grunt', 'async'];
-
-module.exports = Git;
